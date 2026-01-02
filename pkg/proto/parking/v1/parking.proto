@@ -1,0 +1,143 @@
+syntax = "proto3";
+
+package parking.v1;
+
+option go_package = "github.com/parking-super-app/pkg/proto/parking/v1;parkingv1";
+
+service ParkingService {
+  // StartSession creates a new parking session
+  rpc StartSession(StartSessionRequest) returns (StartSessionResponse);
+
+  // EndSession ends an active parking session
+  rpc EndSession(EndSessionRequest) returns (EndSessionResponse);
+
+  // GetSession retrieves session information
+  rpc GetSession(GetSessionRequest) returns (SessionResponse);
+
+  // ListSessions lists sessions for a user
+  rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
+
+  // GetActiveSession gets the user's currently active session
+  rpc GetActiveSession(GetActiveSessionRequest) returns (SessionResponse);
+
+  // AddVehicle registers a new vehicle for a user
+  rpc AddVehicle(AddVehicleRequest) returns (VehicleResponse);
+
+  // ListVehicles lists vehicles for a user
+  rpc ListVehicles(ListVehiclesRequest) returns (ListVehiclesResponse);
+
+  // DeleteVehicle removes a vehicle
+  rpc DeleteVehicle(DeleteVehicleRequest) returns (DeleteVehicleResponse);
+}
+
+message StartSessionRequest {
+  string user_id = 1;
+  string wallet_id = 2;
+  string provider_id = 3;
+  string location_id = 4;
+  string vehicle_id = 5;
+}
+
+message StartSessionResponse {
+  string session_id = 1;
+  string external_session_id = 2;
+  string status = 3;
+  string entry_time = 4;
+  string error_message = 5;
+}
+
+message EndSessionRequest {
+  string session_id = 1;
+  string user_id = 2;
+}
+
+message EndSessionResponse {
+  string session_id = 1;
+  string status = 2;
+  string exit_time = 3;
+  int32 duration_minutes = 4;
+  string amount = 5;
+  string currency = 6;
+  string transaction_id = 7;
+  string error_message = 8;
+}
+
+message GetSessionRequest {
+  string session_id = 1;
+}
+
+message SessionResponse {
+  string id = 1;
+  string user_id = 2;
+  string wallet_id = 3;
+  string provider_id = 4;
+  string location_id = 5;
+  string vehicle_id = 6;
+  string external_session_id = 7;
+  string status = 8;
+  string entry_time = 9;
+  string exit_time = 10;
+  int32 duration_minutes = 11;
+  string amount = 12;
+  string currency = 13;
+  string transaction_id = 14;
+  string created_at = 15;
+  string updated_at = 16;
+}
+
+message ListSessionsRequest {
+  string user_id = 1;
+  string status = 2;
+  int32 limit = 3;
+  int32 offset = 4;
+}
+
+message ListSessionsResponse {
+  repeated SessionResponse sessions = 1;
+  int32 total = 2;
+}
+
+message GetActiveSessionRequest {
+  string user_id = 1;
+}
+
+message AddVehicleRequest {
+  string user_id = 1;
+  string plate_number = 2;
+  string vehicle_type = 3;
+  string brand = 4;
+  string model = 5;
+  string color = 6;
+  bool is_default = 7;
+}
+
+message VehicleResponse {
+  string id = 1;
+  string user_id = 2;
+  string plate_number = 3;
+  string vehicle_type = 4;
+  string brand = 5;
+  string model = 6;
+  string color = 7;
+  bool is_default = 8;
+  string created_at = 9;
+  string updated_at = 10;
+}
+
+message ListVehiclesRequest {
+  string user_id = 1;
+}
+
+message ListVehiclesResponse {
+  repeated VehicleResponse vehicles = 1;
+}
+
+message DeleteVehicleRequest {
+  string vehicle_id = 1;
+  string user_id = 2;
+}
+
+message DeleteVehicleResponse {
+  bool success = 1;
+  string error_message = 2;
+}

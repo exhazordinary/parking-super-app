@@ -1,0 +1,126 @@
+syntax = "proto3";
+
+package provider.v1;
+
+option go_package = "github.com/parking-super-app/pkg/proto/provider/v1;providerv1";
+
+service ProviderService {
+  // StartSession initiates a parking session with the provider
+  rpc StartSession(StartSessionRequest) returns (StartSessionResponse);
+
+  // EndSession terminates a parking session
+  rpc EndSession(EndSessionRequest) returns (EndSessionResponse);
+
+  // GetSessionStatus retrieves the current status of a session
+  rpc GetSessionStatus(GetSessionStatusRequest) returns (SessionStatusResponse);
+
+  // GetProvider retrieves provider information by ID
+  rpc GetProvider(GetProviderRequest) returns (ProviderResponse);
+
+  // ListProviders lists all available providers
+  rpc ListProviders(ListProvidersRequest) returns (ListProvidersResponse);
+
+  // GetLocation retrieves location information
+  rpc GetLocation(GetLocationRequest) returns (LocationResponse);
+
+  // ListLocations lists locations for a provider
+  rpc ListLocations(ListLocationsRequest) returns (ListLocationsResponse);
+}
+
+message StartSessionRequest {
+  string provider_id = 1;
+  string location_id = 2;
+  string vehicle_plate = 3;
+  string vehicle_type = 4;
+  string user_ref = 5;
+}
+
+message StartSessionResponse {
+  string external_session_id = 1;
+  string entry_time = 2;
+  string status = 3;
+  string error_message = 4;
+}
+
+message EndSessionRequest {
+  string provider_id = 1;
+  string external_session_id = 2;
+}
+
+message EndSessionResponse {
+  string exit_time = 1;
+  int32 duration_minutes = 2;
+  string amount = 3;
+  string currency = 4;
+  string error_message = 5;
+}
+
+message GetSessionStatusRequest {
+  string provider_id = 1;
+  string external_session_id = 2;
+}
+
+message SessionStatusResponse {
+  string status = 1;
+  int32 duration_minutes = 2;
+  string current_amount = 3;
+  string currency = 4;
+  string entry_time = 5;
+}
+
+message GetProviderRequest {
+  string id = 1;
+}
+
+message ProviderResponse {
+  string id = 1;
+  string name = 2;
+  string code = 3;
+  string status = 4;
+  string mfe_url = 5;
+  string api_base_url = 6;
+  string logo_url = 7;
+  string created_at = 8;
+  string updated_at = 9;
+}
+
+message ListProvidersRequest {
+  bool active_only = 1;
+  int32 limit = 2;
+  int32 offset = 3;
+}
+
+message ListProvidersResponse {
+  repeated ProviderResponse providers = 1;
+  int32 total = 2;
+}
+
+message GetLocationRequest {
+  string id = 1;
+}
+
+message LocationResponse {
+  string id = 1;
+  string provider_id = 2;
+  string name = 3;
+  string address = 4;
+  double latitude = 5;
+  double longitude = 6;
+  int32 total_slots = 7;
+  int32 available_slots = 8;
+  string status = 9;
+}
+
+message ListLocationsRequest {
+  string provider_id = 1;
+  double latitude = 2;
+  double longitude = 3;
+  double radius_km = 4;
+  int32 limit = 5;
+  int32 offset = 6;
+}
+
+message ListLocationsResponse {
+  repeated LocationResponse locations = 1;
+  int32 total = 2;
+}

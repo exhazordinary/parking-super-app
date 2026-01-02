@@ -1,0 +1,98 @@
+syntax = "proto3";
+
+package wallet.v1;
+
+option go_package = "github.com/parking-super-app/pkg/proto/wallet/v1;walletv1";
+
+service WalletService {
+  // Pay processes a payment from a wallet
+  rpc Pay(PayRequest) returns (PayResponse);
+
+  // GetWallet retrieves wallet information by user ID
+  rpc GetWallet(GetWalletRequest) returns (GetWalletResponse);
+
+  // GetWalletByID retrieves wallet information by wallet ID
+  rpc GetWalletByID(GetWalletByIDRequest) returns (GetWalletResponse);
+
+  // TopUp adds funds to a wallet
+  rpc TopUp(TopUpRequest) returns (TopUpResponse);
+
+  // GetTransactions retrieves transaction history
+  rpc GetTransactions(GetTransactionsRequest) returns (GetTransactionsResponse);
+}
+
+message PayRequest {
+  string wallet_id = 1;
+  string amount = 2;           // String for decimal precision
+  string currency = 3;
+  string provider_id = 4;
+  string reference_id = 5;
+  string description = 6;
+  string idempotency_key = 7;
+}
+
+message PayResponse {
+  string transaction_id = 1;
+  string status = 2;
+  string balance_after = 3;
+  string error_message = 4;
+}
+
+message GetWalletRequest {
+  string user_id = 1;
+}
+
+message GetWalletByIDRequest {
+  string wallet_id = 1;
+}
+
+message GetWalletResponse {
+  string id = 1;
+  string user_id = 2;
+  string balance = 3;
+  string currency = 4;
+  string status = 5;
+  string created_at = 6;
+  string updated_at = 7;
+}
+
+message TopUpRequest {
+  string wallet_id = 1;
+  string amount = 2;
+  string currency = 3;
+  string payment_method = 4;
+  string payment_reference = 5;
+  string idempotency_key = 6;
+}
+
+message TopUpResponse {
+  string transaction_id = 1;
+  string status = 2;
+  string balance_after = 3;
+  string error_message = 4;
+}
+
+message GetTransactionsRequest {
+  string wallet_id = 1;
+  int32 limit = 2;
+  int32 offset = 3;
+}
+
+message GetTransactionsResponse {
+  repeated Transaction transactions = 1;
+  int32 total = 2;
+}
+
+message Transaction {
+  string id = 1;
+  string wallet_id = 2;
+  string type = 3;
+  string amount = 4;
+  string currency = 5;
+  string balance_before = 6;
+  string balance_after = 7;
+  string reference_id = 8;
+  string description = 9;
+  string status = 10;
+  string created_at = 11;
+}

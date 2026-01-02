@@ -83,6 +83,7 @@ type SessionStatusResponse struct {
 // WalletClient for payment operations
 type WalletClient interface {
 	Pay(ctx context.Context, req PaymentRequest) (*PaymentResponse, error)
+	GetWallet(ctx context.Context, userID uuid.UUID) (*WalletInfo, error)
 }
 
 type PaymentRequest struct {
@@ -97,4 +98,12 @@ type PaymentRequest struct {
 type PaymentResponse struct {
 	TransactionID uuid.UUID
 	Status        string
+}
+
+type WalletInfo struct {
+	ID       uuid.UUID
+	UserID   uuid.UUID
+	Balance  decimal.Decimal
+	Currency string
+	Status   string
 }

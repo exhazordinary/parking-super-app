@@ -5,13 +5,16 @@
 # This file sets up all the infrastructure needed for local development:
 # - PostgreSQL database
 # - Redis cache
-# - Kafka message broker (optional)
+# - Kafka message broker
+# - Jaeger distributed tracing
+# - All microservices
 #
 # Usage:
-#   docker-compose up -d       # Start all services
-#   docker-compose down        # Stop all services
-#   docker-compose logs -f     # View logs
-#   docker-compose ps          # Check status
+#   docker-compose up -d                    # Start all services
+#   docker-compose up -d postgres redis     # Start only infrastructure
+#   docker-compose down                     # Stop all services
+#   docker-compose logs -f                  # View logs
+#   docker-compose ps                       # Check status
 
 version: '3.8'
 
@@ -19,23 +22,17 @@ services:
   # ================================================
   # PostgreSQL - Primary database
   # ================================================
-  # Each microservice should have its own database,
-  # but for development we use one PostgreSQL instance
-  # with separate databases.
   postgres:
     image: postgres:15-alpine
     container_name: parking-postgres
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      # Create multiple databases for different services
-      POSTGRES_MULTIPLE_DATABASES: auth_db,wallet_db,provider_db,parking_db
+      POSTGRES_MULTIPLE_DATABASES: auth_db,wallet_db,provider_db,parking_db,notification_db
     ports:
-      - "5433:5432"  # Using 5433 externally since 5432 is in use
+      - "5433:5432"
     volumes:
-      # Persist data between container restarts
       - postgres_data:/var/lib/postgresql/data
-      # Init script to create multiple databases
       - ./init-databases.sh:/docker-entrypoint-initdb.d/init-databases.sh
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
@@ -48,10 +45,6 @@ services:
   # ================================================
   # Redis - Caching and session storage
   # ================================================
-  # Used for:
-  # - Rate limiting
-  # - Session caching
-  # - OTP storage (temporary)
   redis:
     image: redis:7-alpine
     container_name: parking-redis
@@ -68,69 +61,350 @@ services:
       - parking-network
 
   # ================================================
-  # Kafka - Message broker (optional)
+  # Zookeeper - Kafka dependency
   # ================================================
-  # Uncomment when you need async messaging
-  # zookeeper:
-  #   image: confluentinc/cp-zookeeper:7.5.0
-  #   container_name: parking-zookeeper
-  #   environment:
-  #     ZOOKEEPER_CLIENT_PORT: 2181
-  #   networks:
-  #     - parking-network
-  #
-  # kafka:
-  #   image: confluentinc/cp-kafka:7.5.0
-  #   container_name: parking-kafka
-  #   depends_on:
-  #     - zookeeper
-  #   ports:
-  #     - "9092:9092"
-  #   environment:
-  #     KAFKA_BROKER_ID: 1
-  #     KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-  #     KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
-  #     KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-  #   networks:
-  #     - parking-network
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: parking-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - parking-network
 
   # ================================================
-  # Jaeger - Distributed tracing (optional)
+  # Kafka - Message broker
   # ================================================
-  # Uncomment when you need request tracing
-  # jaeger:
-  #   image: jaegertracing/all-in-one:1.50
-  #   container_name: parking-jaeger
-  #   ports:
-  #     - "16686:16686"  # UI
-  #     - "14268:14268"  # Collector
-  #   networks:
-  #     - parking-network
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: parking-kafka
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    healthcheck:
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    networks:
+      - parking-network
+
+  # ================================================
+  # Jaeger - Distributed tracing
+  # ================================================
+  jaeger:
+    image: jaegertracing/all-in-one:1.52
+    container_name: parking-jaeger
+    ports:
+      - "16686:16686"   # UI
+      - "4317:4317"     # OTLP gRPC
+      - "4318:4318"     # OTLP HTTP
+      - "14268:14268"   # Accept jaeger.thrift
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    networks:
+      - parking-network
+
+  # ================================================
+  # API Gateway Service
+  # ================================================
+  api-gateway:
+    build:
+      context: ../../services/api-gateway
+      dockerfile: Dockerfile
+    container_name: parking-api-gateway
+    ports:
+      - "8080:8080"
+    environment:
+      SERVER_PORT: "8080"
+      # Service URLs (internal Docker network)
+      AUTH_SERVICE_URL: http://auth-service:8080
+      AUTH_SERVICE_GRPC: auth-service:9000
+      WALLET_SERVICE_URL: http://wallet-service:8080
+      WALLET_SERVICE_GRPC: wallet-service:9000
+      PROVIDER_SERVICE_URL: http://provider-service:8080
+      PROVIDER_SERVICE_GRPC: provider-service:9000
+      PARKING_SERVICE_URL: http://parking-service:8080
+      PARKING_SERVICE_GRPC: parking-service:9000
+      NOTIFICATION_SERVICE_URL: http://notification-service:8080
+      NOTIFICATION_SERVICE_GRPC: notification-service:9000
+      # JWT
+      JWT_SECRET: dev-secret-key-change-in-production
+      # Tracing
+      OTEL_ENABLED: "true"
+      OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4317
+      OTEL_SERVICE_NAME: api-gateway
+    depends_on:
+      - jaeger
+      - auth-service
+      - wallet-service
+      - provider-service
+      - parking-service
+      - notification-service
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - parking-network
 
   # ================================================
   # Auth Service
   # ================================================
-  # auth-service:
-  #   build:
-  #     context: ../../services/auth
-  #     dockerfile: Dockerfile
-  #   container_name: parking-auth
-  #   ports:
-  #     - "8081:8080"
-  #   environment:
-  #     SERVER_PORT: "8080"
-  #     DB_HOST: postgres
-  #     DB_PORT: "5432"
-  #     DB_USER: postgres
-  #     DB_PASSWORD: postgres
-  #     DB_NAME: auth_db
-  #     DB_SSLMODE: disable
-  #     JWT_SECRET: dev-secret-key-change-in-production
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
-  #   networks:
-  #     - parking-network
+  auth-service:
+    build:
+      context: ../../services/auth
+      dockerfile: Dockerfile
+    container_name: parking-auth
+    ports:
+      - "8081:8080"
+      - "9081:9000"
+    environment:
+      SERVER_PORT: "8080"
+      GRPC_PORT: "9000"
+      # Database
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: auth_db
+      DB_SSLMODE: disable
+      # Redis
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      # JWT
+      JWT_SECRET: dev-secret-key-change-in-production
+      JWT_ACCESS_TOKEN_TTL: 15m
+      JWT_REFRESH_TOKEN_TTL: 168h
+      # Kafka
+      KAFKA_ENABLED: "true"
+      KAFKA_BROKERS: kafka:29092
+      KAFKA_TOPIC: auth.events
+      # Tracing
+      OTEL_ENABLED: "true"
+      OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4317
+      OTEL_SERVICE_NAME: auth-service
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      jaeger:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - parking-network
+
+  # ================================================
+  # Wallet Service
+  # ================================================
+  wallet-service:
+    build:
+      context: ../../services/wallet
+      dockerfile: Dockerfile
+    container_name: parking-wallet
+    ports:
+      - "8082:8080"
+      - "9082:9000"
+    environment:
+      SERVER_PORT: "8080"
+      GRPC_PORT: "9000"
+      # Database
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: wallet_db
+      DB_SSLMODE: disable
+      # Kafka
+      KAFKA_ENABLED: "true"
+      KAFKA_BROKERS: kafka:29092
+      KAFKA_TOPIC: wallet.events
+      # Tracing
+      OTEL_ENABLED: "true"
+      OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4317
+      OTEL_SERVICE_NAME: wallet-service
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      jaeger:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - parking-network
+
+  # ================================================
+  # Provider Service
+  # ================================================
+  provider-service:
+    build:
+      context: ../../services/provider
+      dockerfile: Dockerfile
+    container_name: parking-provider
+    ports:
+      - "8083:8080"
+      - "9083:9000"
+    environment:
+      SERVER_PORT: "8080"
+      GRPC_PORT: "9000"
+      # Database
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: provider_db
+      DB_SSLMODE: disable
+      # Kafka
+      KAFKA_ENABLED: "true"
+      KAFKA_BROKERS: kafka:29092
+      KAFKA_TOPIC: provider.events
+      # Tracing
+      OTEL_ENABLED: "true"
+      OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4317
+      OTEL_SERVICE_NAME: provider-service
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      jaeger:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - parking-network
+
+  # ================================================
+  # Parking Service
+  # ================================================
+  parking-service:
+    build:
+      context: ../../services/parking
+      dockerfile: Dockerfile
+    container_name: parking-parking
+    ports:
+      - "8084:8080"
+      - "9084:9000"
+    environment:
+      SERVER_PORT: "8080"
+      GRPC_PORT: "9000"
+      # Database
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: parking_db
+      DB_SSLMODE: disable
+      # Service dependencies (gRPC)
+      WALLET_SERVICE_GRPC: wallet-service:9000
+      PROVIDER_SERVICE_GRPC: provider-service:9000
+      # Kafka
+      KAFKA_ENABLED: "true"
+      KAFKA_BROKERS: kafka:29092
+      KAFKA_TOPIC: parking.events
+      # Tracing
+      OTEL_ENABLED: "true"
+      OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4317
+      OTEL_SERVICE_NAME: parking-service
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      jaeger:
+        condition: service_started
+      wallet-service:
+        condition: service_healthy
+      provider-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - parking-network
+
+  # ================================================
+  # Notification Service
+  # ================================================
+  notification-service:
+    build:
+      context: ../../services/notification
+      dockerfile: Dockerfile
+    container_name: parking-notification
+    ports:
+      - "8085:8080"
+      - "9085:9000"
+    environment:
+      SERVER_PORT: "8080"
+      GRPC_PORT: "9000"
+      # Database
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: notification_db
+      DB_SSLMODE: disable
+      # Kafka (for consuming events)
+      KAFKA_ENABLED: "true"
+      KAFKA_BROKERS: kafka:29092
+      KAFKA_CONSUMER_GROUP: notification-service
+      KAFKA_TOPICS: parking.events,wallet.events,auth.events
+      # Tracing
+      OTEL_ENABLED: "true"
+      OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4317
+      OTEL_SERVICE_NAME: notification-service
+      # Notification providers (dev mode)
+      SMS_PROVIDER: console
+      EMAIL_PROVIDER: console
+      PUSH_PROVIDER: console
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      jaeger:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - parking-network
 
 networks:
   parking-network:

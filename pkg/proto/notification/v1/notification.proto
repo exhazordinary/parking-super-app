@@ -1,0 +1,117 @@
+syntax = "proto3";
+
+package notification.v1;
+
+option go_package = "github.com/parking-super-app/pkg/proto/notification/v1;notificationv1";
+
+service NotificationService {
+  // SendNotification sends a single notification
+  rpc SendNotification(SendNotificationRequest) returns (SendNotificationResponse);
+
+  // SendBulkNotification sends notifications to multiple users
+  rpc SendBulkNotification(SendBulkNotificationRequest) returns (SendBulkNotificationResponse);
+
+  // GetNotification retrieves a notification by ID
+  rpc GetNotification(GetNotificationRequest) returns (NotificationResponse);
+
+  // ListNotifications lists notifications for a user
+  rpc ListNotifications(ListNotificationsRequest) returns (ListNotificationsResponse);
+
+  // MarkAsRead marks a notification as read
+  rpc MarkAsRead(MarkAsReadRequest) returns (MarkAsReadResponse);
+
+  // UpdatePreferences updates user notification preferences
+  rpc UpdatePreferences(UpdatePreferencesRequest) returns (PreferencesResponse);
+
+  // GetPreferences retrieves user notification preferences
+  rpc GetPreferences(GetPreferencesRequest) returns (PreferencesResponse);
+}
+
+message SendNotificationRequest {
+  string user_id = 1;
+  string channel = 2;          // email, sms, push
+  string template_id = 3;
+  map<string, string> data = 4;
+  string idempotency_key = 5;
+}
+
+message SendNotificationResponse {
+  string notification_id = 1;
+  string status = 2;
+  string error_message = 3;
+}
+
+message SendBulkNotificationRequest {
+  repeated string user_ids = 1;
+  string channel = 2;
+  string template_id = 3;
+  map<string, string> data = 4;
+}
+
+message SendBulkNotificationResponse {
+  int32 total_sent = 1;
+  int32 total_failed = 2;
+  repeated string failed_user_ids = 3;
+}
+
+message GetNotificationRequest {
+  string notification_id = 1;
+}
+
+message NotificationResponse {
+  string id = 1;
+  string user_id = 2;
+  string channel = 3;
+  string template_id = 4;
+  string title = 5;
+  string body = 6;
+  string status = 7;
+  bool is_read = 8;
+  string sent_at = 9;
+  string read_at = 10;
+  string created_at = 11;
+}
+
+message ListNotificationsRequest {
+  string user_id = 1;
+  string channel = 2;
+  bool unread_only = 3;
+  int32 limit = 4;
+  int32 offset = 5;
+}
+
+message ListNotificationsResponse {
+  repeated NotificationResponse notifications = 1;
+  int32 total = 2;
+  int32 unread_count = 3;
+}
+
+message MarkAsReadRequest {
+  string notification_id = 1;
+  string user_id = 2;
+}
+
+message MarkAsReadResponse {
+  bool success = 1;
+}
+
+message UpdatePreferencesRequest {
+  string user_id = 1;
+  bool email_enabled = 2;
+  bool sms_enabled = 3;
+  bool push_enabled = 4;
+  bool marketing_enabled = 5;
+}
+
+message PreferencesResponse {
+  string user_id = 1;
+  bool email_enabled = 2;
+  bool sms_enabled = 3;
+  bool push_enabled = 4;
+  bool marketing_enabled = 5;
+  string updated_at = 6;
+}
+
+message GetPreferencesRequest {
+  string user_id = 1;
+}

@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -25,6 +26,9 @@ import (
 type Config struct {
 	// Server configuration
 	Server ServerConfig
+
+	// gRPC configuration
+	GRPC GRPCConfig
 
 	// Database configuration
 	Database DatabaseConfig
@@ -34,6 +38,12 @@ type Config struct {
 
 	// SMS configuration (optional)
 	SMS SMSConfig
+
+	// Kafka configuration
+	Kafka KafkaConfig
+
+	// OpenTelemetry configuration
+	OTEL OTELConfig
 }
 
 // ServerConfig holds HTTP server settings.
@@ -41,6 +51,11 @@ type ServerConfig struct {
 	Port         string
 	ReadTimeout  time.Duration
 	WriteTimeout time.Duration
+}
+
+// GRPCConfig holds gRPC server settings.
+type GRPCConfig struct {
+	Port string
 }
 
 // DatabaseConfig holds PostgreSQL connection settings.
@@ -75,17 +90,41 @@ type SMSConfig struct {
 	FromPhone  string
 }
 
+// KafkaConfig holds Kafka settings.
+type KafkaConfig struct {
+	Brokers []string
+	Topic   string
+	Enabled bool
+}
+
+// OTELConfig holds OpenTelemetry settings.
+type OTELConfig struct {
+	Enabled     bool
+	Endpoint    string
+	ServiceName string
+	Insecure    bool
+}
+
 // Load reads configuration from environment variables.
 //
 // BEST PRACTICE: Fail Fast
 // If required configuration is missing, fail immediately at startup
 // rather than failing later when the config is needed.
 func Load() (*Config, error) {
+	kafkaEnabled, _ := strconv.ParseBool(getEnv("KAFKA_ENABLED", "false"))
+	otelEnabled, _ := strconv.ParseBool(getEnv("OTEL_ENABLED", "false"))
+	otelInsecure, _ := strconv.ParseBool(getEnv("OTEL_INSECURE", "true"))
+
+	brokers := strings.Split(getEnv("KAFKA_BROKERS", "localhost:9092"), ",")
+
 	cfg := &Config{
 		Server: ServerConfig{
 			Port:         getEnv("SERVER_PORT", "8080"),
 			ReadTimeout:  getDurationEnv("SERVER_READ_TIMEOUT", 10*time.Second),
 			WriteTimeout: getDurationEnv("SERVER_WRITE_TIMEOUT", 10*time.Second),
+		},
+		GRPC: GRPCConfig{
+			Port: getEnv("GRPC_PORT", "9000"),
 		},
 		Database: DatabaseConfig{
 			Host:     getEnv("DB_HOST", "localhost"),
@@ -104,6 +143,17 @@ func Load() (*Config, error) {
 			AccountSID: getEnv("TWILIO_ACCOUNT_SID", ""),
 			AuthToken:  getEnv("TWILIO_AUTH_TOKEN", ""),
 			FromPhone:  getEnv("TWILIO_FROM_PHONE", ""),
+		},
+		Kafka: KafkaConfig{
+			Brokers: brokers,
+			Topic:   getEnv("KAFKA_TOPIC", "auth.events"),
+			Enabled: kafkaEnabled,
+		},
+		OTEL: OTELConfig{
+			Enabled:     otelEnabled,
+			Endpoint:    getEnv("OTEL_EXPORTER_OTLP_ENDPOINT", "localhost:4317"),
+			ServiceName: getEnv("OTEL_SERVICE_NAME", "auth-service"),
+			Insecure:    otelInsecure,
 		},
 	}
 
