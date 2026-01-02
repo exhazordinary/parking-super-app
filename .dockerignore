@@ -1,0 +1,57 @@
+# Git
+.git
+.gitignore
+
+# Documentation
+*.md
+docs/
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+
+# Environment files
+.env
+.env.*
+*.env
+
+# Secrets
+*.pem
+*.key
+*.crt
+secrets/
+
+# Test files
+*_test.go
+test/
+tests/
+coverage.out
+coverage.html
+
+# Build artifacts
+bin/
+dist/
+
+# Logs
+logs/
+*.log
+
+# Temporary
+tmp/
+temp/
+
+# Local configs
+*.local.yaml
+*.local.json
+
+# Go workspace (use go.mod per service)
+go.work
+go.work.sum
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+.dockerignore

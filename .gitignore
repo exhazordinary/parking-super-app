@@ -1,0 +1,85 @@
+# Binaries
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Output of go coverage
+*.out
+coverage.html
+
+# Go workspace
+go.work.sum
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment files - NEVER commit these
+.env
+.env.*
+*.env
+!.env.example
+
+# Secrets and credentials
+*.pem
+*.key
+*.crt
+*.p12
+secrets/
+credentials/
+
+# Local configuration
+config.local.yaml
+config.local.json
+*.local.yaml
+*.local.json
+
+# Logs
+logs/
+*.log
+
+# Temporary files
+tmp/
+temp/
+.tmp/
+
+# Build artifacts
+dist/
+build/
+
+# Vendor (if not using go modules vendor)
+# vendor/
+
+# Air live reload
+.air.toml
+tmp/
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Docker volumes (local)
+.docker-data/
+postgres_data/
+redis_data/
+
+# Test artifacts
+test-results/
+.pytest_cache/
+
+# Node (if any frontend tooling)
+node_modules/
