@@ -6,13 +6,14 @@
 // 1. Loading configuration
 // 2. Creating dependencies (dependency injection)
 // 3. Wiring everything together
-// 4. Starting the HTTP server
+// 4. Starting the HTTP and gRPC servers
 // 5. Graceful shutdown handling
 package main
 
 import (
 	"context"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -21,6 +22,10 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/parking-super-app/pkg/grpc/interceptors"
+	"github.com/parking-super-app/pkg/kafka"
+	"github.com/parking-super-app/pkg/middleware"
+	"github.com/parking-super-app/pkg/telemetry"
 	"github.com/parking-super-app/services/auth/config"
 	"github.com/parking-super-app/services/auth/internal/adapters/external"
 	httpAdapter "github.com/parking-super-app/services/auth/internal/adapters/http"
@@ -28,14 +33,11 @@ import (
 	"github.com/parking-super-app/services/auth/internal/application"
 	"github.com/parking-super-app/services/auth/internal/domain"
 	"github.com/parking-super-app/services/auth/internal/ports"
+	"google.golang.org/grpc"
 )
 
 func main() {
-	// ================================================
-	// 1. LOAD CONFIGURATION
-	// ================================================
-	// Configuration is loaded from environment variables
-	// See config/config.go for available options
+	// Load configuration
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
@@ -43,51 +45,50 @@ func main() {
 
 	log.Printf("Starting auth service on port %s", cfg.Server.Port)
 
-	// ================================================
-	// 2. SET UP DATABASE CONNECTION
-	// ================================================
-	// We use pgxpool for connection pooling
-	// This manages a pool of connections efficiently
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
+	// Initialize OpenTelemetry tracing
+	var tracerShutdown func(context.Context) error
+	if cfg.OTEL.Enabled {
+		shutdown, err := telemetry.InitTracer(ctx, telemetry.Config{
+			ServiceName:  cfg.OTEL.ServiceName,
+			OTLPEndpoint: cfg.OTEL.Endpoint,
+			Insecure:     cfg.OTEL.Insecure,
+			Environment:  "development",
+		})
+		if err != nil {
+			log.Printf("warning: failed to initialize tracer: %v", err)
+		} else {
+			tracerShutdown = shutdown
+			log.Println("OpenTelemetry tracing initialized")
+		}
+	}
+
+	// Set up database connection
 	dbPool, err := pgxpool.New(ctx, cfg.Database.ConnectionString())
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
 	defer dbPool.Close()
 
-	// Verify database connection
 	if err := dbPool.Ping(ctx); err != nil {
 		log.Fatalf("Failed to ping database: %v", err)
 	}
 	log.Println("Connected to database")
 
-	// ================================================
-	// 3. CREATE DEPENDENCIES (Dependency Injection)
-	// ================================================
-	// This is where we wire everything together.
-	// Each component depends on interfaces, and we provide
-	// concrete implementations here.
-	//
-	// PATTERN: Composition Root
-	// All dependency injection happens in one place (main)
-	// This makes it easy to see the application structure
-	// and swap implementations for testing.
-
-	// Repositories (database access)
+	// Create dependencies
 	userRepo := postgres.NewUserRepository(dbPool)
 	tokenRepo := postgres.NewRefreshTokenRepository(dbPool)
-	otpRepo := NewInMemoryOTPRepository() // Simple in-memory for now
+	otpRepo := NewInMemoryOTPRepository()
 
-	// External services
-	passwordHasher := external.NewBcryptPasswordHasher(12) // cost = 12
+	passwordHasher := external.NewBcryptPasswordHasher(12)
 	tokenService := external.NewJWTTokenService(
 		cfg.JWT.SecretKey,
 		cfg.JWT.AccessTokenTTL,
 	)
 	otpGenerator := external.NewSecureOTPGenerator(6)
 
-	// SMS service (based on configuration)
 	var smsService ports.SMSService
 	switch cfg.SMS.Provider {
 	case "twilio":
@@ -100,15 +101,20 @@ func main() {
 		smsService = external.NewConsoleSMSService()
 	}
 
-	// Event publisher (using a no-op for now)
-	eventPublisher := NewNoOpEventPublisher()
+	// Initialize event publisher (Kafka or Noop)
+	var eventPublisher ports.EventPublisher
+	var kafkaPublisher *kafka.Publisher
+	if cfg.Kafka.Enabled {
+		kafkaPublisher = kafka.NewPublisher(kafka.DefaultPublisherConfig(cfg.Kafka.Brokers, cfg.Kafka.Topic))
+		eventPublisher = &kafkaEventAdapter{publisher: kafkaPublisher}
+		log.Println("Kafka event publisher initialized")
+	} else {
+		eventPublisher = NewNoOpEventPublisher()
+	}
 
-	// Logger
 	logger := NewSimpleLogger()
 
-	// ================================================
-	// 4. CREATE APPLICATION SERVICE
-	// ================================================
+	// Create application service
 	authService := application.NewAuthService(
 		userRepo,
 		tokenRepo,
@@ -121,52 +127,75 @@ func main() {
 		logger,
 	)
 
-	// ================================================
-	// 5. CREATE HTTP ROUTER
-	// ================================================
+	// Create HTTP router with tracing middleware
 	router := httpAdapter.NewRouter(authService, tokenService)
+	if cfg.OTEL.Enabled {
+		router.Use(middleware.Tracing(cfg.OTEL.ServiceName))
+	}
 
 	// Create HTTP server
-	server := &http.Server{
+	httpServer := &http.Server{
 		Addr:         ":" + cfg.Server.Port,
 		Handler:      router,
 		ReadTimeout:  cfg.Server.ReadTimeout,
 		WriteTimeout: cfg.Server.WriteTimeout,
 	}
 
-	// ================================================
-	// 6. START SERVER WITH GRACEFUL SHUTDOWN
-	// ================================================
-	// PATTERN: Graceful Shutdown
-	// When receiving SIGTERM (Kubernetes) or SIGINT (Ctrl+C):
-	// 1. Stop accepting new connections
-	// 2. Wait for existing requests to complete
-	// 3. Close database connections
-	// 4. Exit cleanly
+	// Create gRPC server
+	grpcServer := interceptors.NewServerWithDefaults()
+	// Register gRPC services when proto is generated
+	// authv1.RegisterAuthServiceServer(grpcServer, authGRPCServer)
 
-	// Channel to receive OS signals
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	// Start gRPC server
+	grpcListener, err := net.Listen("tcp", ":"+cfg.GRPC.Port)
+	if err != nil {
+		log.Fatalf("failed to listen on gRPC port: %v", err)
+	}
 
-	// Start server in a goroutine
 	go func() {
-		log.Printf("Auth service listening on :%s", cfg.Server.Port)
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Printf("Auth gRPC server listening on port %s", cfg.GRPC.Port)
+		if err := grpcServer.Serve(grpcListener); err != nil {
+			log.Printf("gRPC server error: %v", err)
+		}
+	}()
+
+	// Start HTTP server
+	go func() {
+		log.Printf("Auth HTTP server listening on port %s", cfg.Server.Port)
+		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Failed to start server: %v", err)
 		}
 	}()
 
-	// Wait for shutdown signal
+	// Graceful shutdown
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
-	log.Println("Shutting down server...")
+	log.Println("Shutting down servers...")
 
-	// Create context with timeout for shutdown
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer shutdownCancel()
 
-	// Attempt graceful shutdown
-	if err := server.Shutdown(shutdownCtx); err != nil {
-		log.Printf("Server forced to shutdown: %v", err)
+	// Shutdown HTTP server
+	if err := httpServer.Shutdown(shutdownCtx); err != nil {
+		log.Printf("HTTP server forced to shutdown: %v", err)
+	}
+
+	// Shutdown gRPC server
+	grpcServer.GracefulStop()
+
+	// Close Kafka publisher
+	if kafkaPublisher != nil {
+		if err := kafkaPublisher.Close(); err != nil {
+			log.Printf("failed to close Kafka publisher: %v", err)
+		}
+	}
+
+	// Shutdown tracer
+	if tracerShutdown != nil {
+		if err := tracerShutdown(shutdownCtx); err != nil {
+			log.Printf("failed to shutdown tracer: %v", err)
+		}
 	}
 
 	log.Println("Server exited")
@@ -175,11 +204,8 @@ func main() {
 // ================================================
 // TEMPORARY IMPLEMENTATIONS
 // ================================================
-// These are simple implementations for development.
-// Replace with proper implementations for production.
 
 // InMemoryOTPRepository is a simple in-memory OTP store.
-// TODO: Replace with Redis or PostgreSQL in production.
 type InMemoryOTPRepository struct {
 	otps map[string]*domain.OTP
 	mu   sync.RWMutex
@@ -190,8 +216,6 @@ func NewInMemoryOTPRepository() *InMemoryOTPRepository {
 		otps: make(map[string]*domain.OTP),
 	}
 }
-
-// Implement ports.OTPRepository interface
 
 func (r *InMemoryOTPRepository) Create(ctx context.Context, otp *domain.OTP) error {
 	r.mu.Lock()
@@ -273,4 +297,16 @@ func (l *SimpleLogger) Error(msg string, fields ...ports.Field) {
 
 func (l *SimpleLogger) WithFields(fields ...ports.Field) ports.Logger {
 	return l
+}
+
+// kafkaEventAdapter adapts kafka.Publisher to ports.EventPublisher
+type kafkaEventAdapter struct {
+	publisher *kafka.Publisher
+}
+
+func (a *kafkaEventAdapter) Publish(ctx context.Context, event ports.Event) error {
+	return a.publisher.Publish(ctx, kafka.Event{
+		Type:    event.Type,
+		Payload: event.Payload,
+	})
 }

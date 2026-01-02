@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
@@ -10,9 +11,11 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
+	"github.com/parking-super-app/pkg/middleware"
+	"github.com/parking-super-app/pkg/telemetry"
 	"github.com/parking-super-app/services/api-gateway/config"
 	"github.com/parking-super-app/services/api-gateway/internal/health"
-	"github.com/parking-super-app/services/api-gateway/internal/middleware"
+	gatewaymw "github.com/parking-super-app/services/api-gateway/internal/middleware"
 	"github.com/parking-super-app/services/api-gateway/internal/proxy"
 )
 
@@ -24,9 +27,29 @@ func main() {
 
 	log.Println("Starting API Gateway...")
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Initialize OpenTelemetry tracing
+	var tracerShutdown func(context.Context) error
+	if cfg.OTEL.Enabled {
+		shutdown, err := telemetry.InitTracer(ctx, telemetry.Config{
+			ServiceName:  cfg.OTEL.ServiceName,
+			OTLPEndpoint: cfg.OTEL.Endpoint,
+			Insecure:     cfg.OTEL.Insecure,
+			Environment:  "development",
+		})
+		if err != nil {
+			log.Printf("warning: failed to initialize tracer: %v", err)
+		} else {
+			tracerShutdown = shutdown
+			log.Println("OpenTelemetry tracing initialized")
+		}
+	}
+
 	// Initialize components
-	authMw := middleware.NewAuthMiddleware(cfg.Auth.JWTSecret)
-	rateLimiter := middleware.NewRateLimiter(100, time.Minute)
+	authMw := gatewaymw.NewAuthMiddleware(cfg.Auth.JWTSecret)
+	rateLimiter := gatewaymw.NewRateLimiter(100, time.Minute)
 	serviceProxy := proxy.NewServiceProxy()
 
 	// Initialize health checker
@@ -46,8 +69,13 @@ func main() {
 	r.Use(chimw.RealIP)
 	r.Use(chimw.Logger)
 	r.Use(chimw.Recoverer)
-	r.Use(middleware.CORS)
+	r.Use(gatewaymw.CORS)
 	r.Use(rateLimiter.Limit)
+
+	// Add tracing middleware
+	if cfg.OTEL.Enabled {
+		r.Use(middleware.Tracing(cfg.OTEL.ServiceName))
+	}
 
 	// Health endpoint
 	r.Get("/health", healthChecker.Handler())
@@ -119,4 +147,21 @@ func main() {
 	<-quit
 
 	log.Println("Shutting down API Gateway...")
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer shutdownCancel()
+
+	// Shutdown HTTP server
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		log.Printf("server forced to shutdown: %v", err)
+	}
+
+	// Shutdown tracer
+	if tracerShutdown != nil {
+		if err := tracerShutdown(shutdownCtx); err != nil {
+			log.Printf("failed to shutdown tracer: %v", err)
+		}
+	}
+
+	log.Println("API Gateway stopped")
 }
