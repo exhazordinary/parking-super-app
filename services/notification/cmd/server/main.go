@@ -1,0 +1,93 @@
+package main
+
+import (
+	"context"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/parking-super-app/services/notification/config"
+	"github.com/parking-super-app/services/notification/internal/adapters/external"
+	httpAdapter "github.com/parking-super-app/services/notification/internal/adapters/http"
+	"github.com/parking-super-app/services/notification/internal/adapters/repository/postgres"
+	"github.com/parking-super-app/services/notification/internal/application"
+)
+
+func main() {
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("failed to load config: %v", err)
+	}
+
+	logger := external.NewStdLogger()
+	logger.Info("starting notification service")
+
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, cfg.Database.ConnectionString())
+	if err != nil {
+		log.Fatalf("failed to connect to database: %v", err)
+	}
+	defer pool.Close()
+
+	if err := pool.Ping(ctx); err != nil {
+		log.Fatalf("failed to ping database: %v", err)
+	}
+	logger.Info("connected to database")
+
+	// Initialize repositories
+	notificationRepo := postgres.NewNotificationRepository(pool)
+	preferenceRepo := postgres.NewPreferenceRepository(pool)
+
+	// Initialize providers
+	pushProvider := external.NewMockPushProvider()
+	smsProvider := external.NewMockSMSProvider()
+	emailProvider := external.NewMockEmailProvider()
+
+	// Initialize application service
+	notificationService := application.NewNotificationService(
+		notificationRepo,
+		nil, // template repo
+		preferenceRepo,
+		pushProvider,
+		smsProvider,
+		emailProvider,
+		logger,
+	)
+
+	// Initialize HTTP router
+	router := httpAdapter.NewRouter(notificationService)
+
+	server := &http.Server{
+		Addr:         ":" + cfg.Server.Port,
+		Handler:      router,
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 15 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
+
+	go func() {
+		log.Printf("Notification service listening on port %s", cfg.Server.Port)
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("server error: %v", err)
+		}
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	logger.Info("shutting down server")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := server.Shutdown(ctx); err != nil {
+		log.Fatalf("server forced to shutdown: %v", err)
+	}
+
+	logger.Info("server stopped gracefully")
+}
