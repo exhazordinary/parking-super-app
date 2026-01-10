@@ -10,6 +10,10 @@ import { AppProviders } from './providers/AppProviders';
 import { RootNavigator } from './navigation/RootNavigator';
 import { theme } from '@parking/ui';
 import { linking } from '@parking/navigation';
+import { initializeSentry, Sentry } from './sentry';
+
+// Initialize Sentry before app renders
+initializeSentry();
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -25,7 +29,7 @@ const queryClient = new QueryClient({
   },
 });
 
-export default function App(): React.JSX.Element {
+function App(): React.JSX.Element {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
@@ -43,3 +47,6 @@ export default function App(): React.JSX.Element {
     </GestureHandlerRootView>
   );
 }
+
+// Wrap with Sentry for automatic performance monitoring
+export default Sentry.wrap(App);
