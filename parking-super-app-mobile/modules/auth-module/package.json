@@ -1,0 +1,39 @@
+{
+  "name": "@parking/auth-module",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "scripts": {
+    "start": "react-native webpack-start --port 9001 --webpackConfig webpack.config.mjs",
+    "build": "react-native webpack-bundle --platform ios --dev false --entry-file src/index.ts --webpackConfig webpack.config.mjs",
+    "build:android": "react-native webpack-bundle --platform android --dev false --entry-file src/index.ts --webpackConfig webpack.config.mjs",
+    "lint": "eslint src/",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist build"
+  },
+  "dependencies": {
+    "@parking/ui": "*",
+    "@parking/api": "*",
+    "@parking/auth": "*",
+    "@parking/navigation": "*"
+  },
+  "peerDependencies": {
+    "react": ">=18.0.0",
+    "react-native": ">=0.73.0",
+    "react-native-paper": ">=5.0.0",
+    "@react-navigation/native": ">=6.0.0",
+    "@react-navigation/native-stack": ">=6.0.0",
+    "@tanstack/react-query": ">=5.0.0",
+    "zustand": ">=4.0.0"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.24.0",
+    "@callstack/repack": "^4.0.0",
+    "@react-native/babel-preset": "^0.73.21",
+    "@types/react": "^18.2.64",
+    "@types/react-native": "^0.73.0",
+    "babel-loader": "^9.1.3",
+    "typescript": "^5.4.2",
+    "webpack": "^5.90.3"
+  }
+}
