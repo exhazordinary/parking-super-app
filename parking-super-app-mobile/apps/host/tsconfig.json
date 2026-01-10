@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"],
+      "@parking/ui": ["../../packages/ui/src"],
+      "@parking/api": ["../../packages/api/src"],
+      "@parking/auth": ["../../packages/auth/src"],
+      "@parking/navigation": ["../../packages/navigation/src"]
+    }
+  },
+  "include": ["src/**/*", "index.js"],
+  "exclude": ["node_modules", "dist", "build", "android", "ios"]
+}
