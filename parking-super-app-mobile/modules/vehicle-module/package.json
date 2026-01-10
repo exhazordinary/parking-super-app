@@ -1,0 +1,13 @@
+{
+  "name": "@parking/vehicle-module",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "scripts": {
+    "start": "react-native webpack-start --port 9004 --webpackConfig webpack.config.mjs",
+    "build": "react-native webpack-bundle --platform ios --dev false --entry-file src/index.ts --webpackConfig webpack.config.mjs"
+  },
+  "dependencies": { "@parking/ui": "*", "@parking/api": "*", "@parking/auth": "*", "@parking/navigation": "*" },
+  "peerDependencies": { "react": ">=18.0.0", "react-native": ">=0.73.0" },
+  "devDependencies": { "@babel/core": "^7.24.0", "@callstack/repack": "^4.0.0", "@types/react": "^18.2.64", "typescript": "^5.4.2", "webpack": "^5.90.3" }
+}
