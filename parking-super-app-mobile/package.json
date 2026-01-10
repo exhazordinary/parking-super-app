@@ -1,0 +1,29 @@
+{
+  "name": "parking-super-app-mobile",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "modules/*"
+  ],
+  "scripts": {
+    "build": "turbo run build",
+    "build:modules": "turbo run build --filter='./modules/*'",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "clean": "turbo run clean && rm -rf node_modules",
+    "typecheck": "turbo run typecheck",
+    "host:start": "yarn workspace @parking/host start",
+    "host:ios": "yarn workspace @parking/host ios",
+    "host:android": "yarn workspace @parking/host android"
+  },
+  "devDependencies": {
+    "turbo": "^2.0.0"
+  },
+  "packageManager": "yarn@1.22.19",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

@@ -1,0 +1,74 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+*.tsbuildinfo
+
+# React Native
+*.xcworkspace
+*.xcodeproj
+Pods/
+*.ipa
+*.apk
+*.aab
+
+# Android
+android/.gradle/
+android/app/build/
+android/build/
+*.keystore
+!debug.keystore
+
+# iOS
+ios/Pods/
+ios/build/
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+*.xcuserstate
+project.xcworkspace/
+xcuserdata/
+DerivedData/
+
+# Metro
+.metro-health-check*
+
+# Debug
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env files
+.env
+.env.local
+.env.*.local
+
+# Turbo
+.turbo/
+
+# Temporary files
+*.log
+*.tmp
+
+# Bundle files
+*.jsbundle
+*.jsbundle.map
+
+# Test coverage
+coverage/
+
+# Sentry
+.sentryclirc
